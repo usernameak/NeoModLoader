@@ -1,3 +1,8 @@
+var Resources = [
+	"font.ttf",
+	"lang/en-US.lang"
+];
+
 var context = com.mojang.minecraftpe.MainActivity.currentMainActivity.get();
 var jsContext = new org.mozilla.javascript.ContextFactory().enterContext();
 var transparentDrawable = new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT);
@@ -6,6 +11,7 @@ function runOnUiThread(func) {context.runOnUiThread(func);}
 print = function(s) {runOnUiThread(function() {try {android.widget.Toast.makeText(context, "[NML]: " + s, 500).show();} catch (err) {}});};
 var date = java.lang.String.valueOf(android.text.format.DateFormat.format("yyyy-MM-dd_HH.mm.ss", new java.util.Date()));
 var log;
+var mods = [];
 var buttonWindow;
 
 var Java = {
@@ -33,21 +39,11 @@ Paths.minecraft = new Java.File("/sdcard/games/com.mojang/minecraftpe");
 Paths.mods = new Java.File(Paths.minecraft, "mods");
 Paths.configs = new Java.File(Paths.minecraft, "configs");
 Paths.logs = new Java.File(Paths.minecraft, "logs");
-Paths.res = new Java.File("/sdcard/games/com.mojang/minecraftpe/res");
+Paths.tmp = new Java.File("/sdcard/games/com.mojang/minecraftpe/tmp");
 
-var minecraftFont = android.graphics.Typeface.createFromFile(new Java.File(Paths.res, "font.ttf"));
+var minecraftFont;
 
-var lang = {
-	descVersion: "Version",
-	descID: "Mod ID",
-	descAuthors: "Authors",
-	descNoDescription: "No description available.",
-	modsListTitle: "Mods List",
-	modsListClose: "Close",
-	modsButton: "Mods"
-};
-
-var Mods = [];
+var lang;
 
 function Version(str) {
 	if (typeof str == "string") {
@@ -112,24 +108,34 @@ function Version(str) {
 	};
 };
 
-function Mod(modDir) {
-	this.directory = modDir;
+function Mod(directory) {
+	this.directory = directory;
 
-	if (new Java.File(modDir, "pemod.info").isFile()) {
-		var info = Config.parse(new Java.File(modDir, "pemod.info"));
-		if (info["id"] == undefined) {
-			Log.error("Mod \"" + modDir.getName() + "\" cannot be loaded. pemod.info is missing");
-			return;
-		}
-		this.name = info["name"] === undefined ? modDir.getName() : info["name"];
-		this.id = info["id"] === undefined ? undefined : info["id"];
-		this.description = info["description"] === undefined ? "No description available." : info["description"];
-		this.version = info["version"] === undefined ? undefined : new Version(info["version"]);
-		this.authors = info["authors"] === undefined ? undefined : info["authors"];
-	} else {
-		Log.error("Mod \"" + modDir.getName() + "\" cannot be loaded. pemod.info is missing");
+	if (!new Java.File(directory, "mod.js").isFile()) {
+		Log.error("Mod \"" + directory.getName() + "\" cannot be loaded. mod.js is missing");
 		return;
 	}
+
+	if (!new Java.File(directory, "pemod.info").isFile()) {
+		Log.error("Mod \"" + directory.getName() + "\" cannot be loaded. pemod.info is missing");
+		return;
+	}
+
+	var info = Config.parse(new Java.File(directory, "pemod.info"));
+	if (!info.hasOwnProperty("id") || !info.hasOwnProperty("name")) {
+		Log.error("Mod \"" + directory.getName() + "\" cannot be loaded. pemod.info is incomplete");
+		return;
+	}
+
+	if (Mods.isModLoaded(info["id"])) {
+		Log.error("Mod cannot be loaded. Mod with id \"" + info.id + "\"already loaded.");
+	}
+
+	this.name = info.name;
+	this.id = info.id;
+	this.description = info["description"] === undefined ? "No description available." : info.description;
+	this.version = info["version"] === undefined ? undefined : new Version(info.version);
+	this.authors = info["authors"] === undefined ? undefined : info.authors;
 
 	this.config = new Object();
 	var modFile = new Java.File(this.directory, "mod.js");
@@ -137,20 +143,17 @@ function Mod(modDir) {
 
 	jsContext.evaluateReader(this.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
 
-	Mods[this.id] = this;
-	Mods.push(this);
+	mods[this.id] = this;
+	mods.push(this);
 }
 
 function API(mod) {
-	var Log;
-	var File;
-	var Mods;
-	var Config;
-	var print;
+	this.File = File;
+	this.Mods = Mods;
 
-	print = function(s) {runOnUiThread(function() {try {android.widget.Toast.makeText(context, "[" + mod.name + "]: " + s, 500).show();} catch (err) {print(err);}});};
+	this.print = function(s) {runOnUiThread(function() {try {android.widget.Toast.makeText(context, "[" + mod.name + "]: " + s, 500).show();} catch (err) {print(err);}});};
 
-	Log = {
+	this.Log = {
 		info:function(text) {
 			File.write(log, File.read(log) + "\n[INFO] [" + mod.name + "] " + text);
 		},
@@ -162,137 +165,70 @@ function API(mod) {
 		}
 	};
 
-	File = {
-		read: function(file) {
-			var source = file;
-			var fis = null;
-			var out = "";
-			if (!source.exists()) {
-				source.createNewFile();
-			}
-			try {
-				fis = new java.io.FileInputStream(source);
-			} catch (e) {
-				Log.error(e);
-			}
-			var data = fis.read();
-			while (data != -1) {
-				out += String.fromCharCode(data);
-				data = fis.read();
-			}
-			fis.close();
-			return out;
+	this.Config = {
+		get:function(name) {
+			return mod.config[name];
+		}, 
+		getFull:function() {
+			return mods[mod.id].config;
 		},
-		write: function(file, text) {
-			var fhandle = file;
-			try {
-				if (!fhandle.getParentFile().exists())
-					fhandle.getParentFile().mkdirs();
-				fhandle.createNewFile();
-				var fOut = new java.io.FileOutputStream(fhandle);
-				var myOutWriter = new java.io.OutputStreamWriter(fOut);
-				myOutWriter.write(text);
-				myOutWriter.close();
-				fOut.close();
-			} catch (e) {
-				Log.error(e);
-			}
+		set:function(name, value) {
+			mod.config[name] = value;
+			Config.save(new Java.File(Paths.configs, mod.id + ".cfg", mod.config));
+			return true;
+		},
+		setFull:function(value) {
+			mod.config = value;
+			Config.save(new Java.File(Paths.configs, mod.id + ".cfg", mod.config));
+			return true;
 		}
 	};
-
-	Mods = {
-		getAPI: ModsAPI.getAPI, 
-		getVer: ModsAPI.getVer, 
-		getBuild: ModsAPI.getBuild, 
-		isModLoaded: ModsAPI.isModLoaded
-	};
-
-	this.print = print;
-	this.Log = Log;
-	this.File = File;
-	this.Mods = Mods;
-
-	if (mod.id != undefined) {
-		Config = {
-			get:function(name) {
-				return Mods[mod.id][name];
-			}, 
-			getFull:function() {
-				return Mods[mod.id].config;
-			},
-			set:function(name, value) {
-				if (typeof Mods[mod.id].config == "object") {
-					Mods[mod.id].config[name] = value;
-					Config.save(new Java.File(Paths.configs, mod.id + ".cfg", Mods[mod.id].config));
-					return true;
-				}
-				return false;
-			},
-			setFull:function(value) {
-				if (typeof Mods[mod.id].config == "object" && typeof val == "object") {
-					Mods[mod.id].config = value;
-					Config.save(new Java.File(Paths.configs, mod.id + ".cfg", Mods[mod.id].config));
-					return true;
-				}
-				return false;
-			}
-		};
-	}
 }
 
 function loadMod(directory) {
-	try {
-		if (directory.isDirectory()) {
-			var modFile = new Java.File(directory, "mod.js");
-			if (modFile.isFile()) {
-				var mod = new Mod(directory);
-				return true;
-			}
+	if (directory.isDirectory()) {
+		var modFile = new Java.File(directory, "mod.js");
+		if (modFile.isFile()) {
+			var mod = new Mod(directory);
+			return true;
 		}
-	} catch (e) {
-		Log.error(e);
-		return false;
 	}
-	return false;
 }
 
 function loadMods() {
-	try {
-		Mods = [];
-		Mods["NML"] = {
-			id: "NML",
-			description: "First mod loader for MCPE",
-			name: "NeoModLoader",
-			version: new Version("0.0.1"),
-			authors: "NeoKat"
-		};
-		Mods.push(Mods.NML);
-		var list = Paths.mods.listFiles();
-		for (var i = 0;i < list.length;i++) {
-			if (list[i].isDirectory()) {
-				loadMod(list[i]);
-			}
+	mods = [];
+	mods["NML"] = {
+		id: "NML",
+		description: "First mod loader for MCPE",
+		name: "NeoModLoader",
+		version: new Version("0.0.1"),
+		authors: "NeoKat",
+		scope: {}
+	};
+	mods.push(mods.NML);
+	var list = Paths.mods.listFiles();
+	list.forEach(
+		function(item, index, array) {
+			loadMod(item);
 		}
-	} catch (e) {
-		Log.error(e);
-	}
+	);
 }
 
 function showModList() {
 	var layout = new android.widget.RelativeLayout(context);
-	
+
 	var window = new android.widget.PopupWindow(layout, Java.LayoutParams.fillParent, Java.LayoutParams.fillParent);
 	window.setBackgroundDrawable(blackDrawable);
-	
+
 	var layoutParams;
-	
+
 	var width = context.getResources().getDisplayMetrics().widthPixels;
 	var height = context.getResources().getDisplayMetrics().heightPixels;
 	var width4 = width / 4;
 	var width32 = width / 32;
 	var height5 = height / 5;
 	var height10 = height / 10;
-	
+
 	var modInfo = new android.widget.TextView(context);
 	modInfo.setTypeface(minecraftFont);
 	layoutParams = android.widget.RelativeLayout.LayoutParams(width - width4 - width32, height - height5);
@@ -300,7 +236,7 @@ function showModList() {
 	layoutParams.addRule(15);
 	modInfo.setLayoutParams(layoutParams);
 	layout.addView(modInfo);
-	
+
 	var title = new android.widget.TextView(context);
 	title.setTypeface(minecraftFont);
 	title.setText(lang.modsListTitle);
@@ -309,21 +245,21 @@ function showModList() {
 	layoutParams.addRule(10);
 	title.setLayoutParams(layoutParams);
 	layout.addView(title);
-	
+
 	var closeButton = new android.widget.Button(context);
 	closeButton.setTypeface(minecraftFont);
 	closeButton.setText(lang.modsListClose);
-	closeButton.setOnClickListener(function(){window.dismiss();});
+	closeButton.setOnClickListener(function() {window.dismiss();});
 	layoutParams = android.widget.RelativeLayout.LayoutParams(-1, height10);
 	layoutParams.addRule(12);
 	closeButton.setLayoutParams(layoutParams);
 	layout.addView(closeButton);
-	
+
 	var modList = new android.widget.ScrollView(context);
 	var modListLayout = new android.widget.LinearLayout(context);
 	modListLayout.setOrientation(1);
 	modList.addView(modListLayout);
-	Mods.forEach(
+	mods.forEach(
 		function(mod, index, array) {
 			modName = mod.name + "\n";
 			if (mod.version !== undefined)
@@ -353,14 +289,10 @@ function showModList() {
 }
 
 function getModInfo(mod) {
-	var text = "";
-	if (mod.name != undefined)
-		text += mod.name + "\n";
-	if (mod.id != undefined)
-		text += lang.descID + ": '" + mod.id + "'\n";
-	if (mod.authors != undefined)
+	var text = mod.name + "\n" + lang.descID + ": '" + mod.id + "'\n";
+	if (mod.hasOwnProperty("authors"))
 		text += lang.descAuthors + ": '" + mod.authors + "'\n";
-	if (mod.description != undefined)
+	if (mod.hasOwnProperty("description"))
 		text += "\n" + mod.description;
 
 	return text;
@@ -370,11 +302,11 @@ function showModsButton() {
 	var layout = new android.widget.LinearLayout(context);
 	buttonWindow = new android.widget.PopupWindow(layout, Java.LayoutParams.wrapContent, Java.LayoutParams.wrapContent);
 	buttonWindow.setBackgroundDrawable(transparentDrawable);
-	
+
 	var button = new android.widget.Button(context);
 	button.setTypeface(minecraftFont);
 	button.setText(lang.modsButton);
-	button.setOnClickListener(function(){showModList();});
+	button.setOnClickListener(function() {showModList();});
 	layout.addView(button);
 
 	runOnUiThread(
@@ -385,7 +317,7 @@ function showModsButton() {
 }
 
 function hideModsButton() {
-
+	buttonWindow.dismiss();
 }
 
 /******************************/
@@ -394,39 +326,36 @@ function hideModsButton() {
 
 File = {
 	read: function(file) {
-		var source = file;
-		var fis = null;
-		var out = "";
-		if (!source.exists()) {
-			source.createNewFile();
+		if (!file.exists()) {
+			file.createNewFile();
 		}
-		try {
-			fis = new java.io.FileInputStream(source);
-		} catch (e) {
-
-		}
-		var data = fis.read();
+		var fileInput = new java.io.FileInputStream(file);
+		var output = "";
+		var data = fileInput.read();
 		while (data != -1) {
-			out += String.fromCharCode(data);
-			data = fis.read();
+			output += String.fromCharCode(data);
+			data = fileInput.read();
 		}
-		fis.close();
-		return out;
+		fileInput.close();
+		return output;
 	},
 	write: function(file, text) {
-		var fhandle = file;
-		try {
-			if (!fhandle.getParentFile().exists())
-				fhandle.getParentFile().mkdirs();
-			fhandle.createNewFile();
-			var fOut = new java.io.FileOutputStream(fhandle);
-			var myOutWriter = new java.io.OutputStreamWriter(fOut);
-			myOutWriter.write(text);
-			myOutWriter.close();
-			fOut.close();
-		} catch (e) {
-
-		}
+		if (!file.getParentFile().exists())
+			file.getParentFile().mkdirs();
+		file.createNewFile();
+		var fileOutput = new java.io.FileOutputStream(file);
+		var outputWriter = new java.io.OutputStreamWriter(fileOutput);
+		outputWriter.write(text);
+		outputWriter.close();
+		fileOutput.close();
+	}, 
+	writeBytes: function(file, bytes) {
+		if (!file.getParentFile().exists())
+			file.getParentFile().mkdirs();
+		file.createNewFile();
+		var fileOutput = new java.io.FileOutputStream(file);
+		fileOutput.write(bytes);
+		fileOutput.close();
 	}
 };
 
@@ -451,52 +380,19 @@ Config = {
 	}
 };
 
-ModsAPI = {
-	add: function(mod, id) {
-		if (id != undefined) {
-			if (mods[id] == undefined)
-				mods[id] = mod;
-		} else {
-			if (id == "NML")
-				return false;
-			mods.push(mod);
-		}
-	},
-	get: function(id) {
-		return mods[id];
-	},
-	getByInt: function(i) {
-		return mods[i];
-	},
-	getAPI:function(modName) {
-		if (modName == "NML")
+Mods = {
+	getAPI:function(id) {
+		if (!Mods.isModLoaded(id) || !mods[id].scope.hasOwnProperty("API"))
 			return {};
-		if (!ModsAPI.isModLoaded(modName))
-			return {};
-		if (ModsAPI.get(modName).scope.API == undefined)
-			return {};
-		return ModsAPI.get(modName).scope.API;
+		return mods[id].scope.API;
 	}, 
-	getVer: function(modName) {
-		if (modName == "NML")
-			return version;
-		if (!ModsAPI.isModLoaded(modName))
-			return "";
-		if (ModsAPI.get(modName).modInfo.version == undefined)
-			return "";
-		return ModsAPI.get(modName).modInfo.version;
+	getVersion: function(id) {
+		if (!Mods.isModLoaded(id) || !mods[id].hasOwnProperty("version"))
+			return new Version();
+		return mods[id].version;
 	}, 
-	getBuild:function(modName) {
-		if (modName == "NML")
-			return build;
-		if (!ModsAPI.isModLoaded(modName))
-			return "";
-		if (ModsAPI.get(modName).modInfo.build == undefined)
-			return "";
-		return ModsAPI.get(modName).modInfo.build;
-	}, 
-	isModLoaded:function(modID) {
-		if (Mods.hasOwnProperty(modID))
+	isModLoaded:function(id) {
+		if (mods.hasOwnProperty(id))
 			return true;
 		return false;
 	}
@@ -511,18 +407,32 @@ var JSON = {
 	}
 };
 
+function getResource(path) {
+	var bytes = ModPE.getBytesFromTexturePack(path);
+	if (bytes == null)
+		return false;
+	return new java.lang.String(bytes);
+}
+
+function getResourceBytes(path) {
+	var bytes = ModPE.getBytesFromTexturePack(path);
+	if (bytes == null)
+		return false;
+	return bytes;
+}
+
 /******************************/
 /*****Initialization block*****/
 /******************************/
 
-for (var i = 0;;i++)
-	if (!new Java.File(Paths.logs + date + "-" + i + ".log").exists()) {
-		log = new Java.File(Paths.logs, date + "-" + i + ".log");
-		break;
-	}
-
 function init() {
+	for (var i = 0;;i++)
+		if (!new Java.File(Paths.logs + date + "-" + i + ".log").exists()) {
+			log = new Java.File(Paths.logs, date + "-" + i + ".log");
+			break;
+		}
 	File.write(log, "[INFO] NML initialization");
+	
 	initFiles();
 	loadMods();
 	showModsButton();
@@ -533,9 +443,23 @@ function initFiles() {
 	Paths.mods.mkdirs();
 	Paths.configs.mkdirs();
 	Paths.logs.mkdirs();
+	Paths.tmp.mkdirs();
+
+	Resources.forEach(
+		function(item, index, array) {
+			if (!getResource(item)) {
+				Log.error("NML can't load because some resources is unaccessible.");
+				throw new java.lang.Exception("NML can't load because some resources is unaccessible.");
+			}
+		}
+	);
+
+	if (!new Java.File(Paths.tmp, "font.ttf").exists())
+		File.writeBytes(new Java.File(Paths.tmp, "font.ttf"), getResourceBytes("font.ttf"));
+	minecraftFont = android.graphics.Typeface.createFromFile(new Java.File(Paths.tmp, "font.ttf"));
+	new Java.File(Paths.tmp, "font.ttf")["delete"]();
+	
+	lang = JSON.parse(getResource("lang/en-US.lang"));
 }
 
 init();
-//var bbb = true;
-//var thread = new java.lang.Thread(function(){while(true){if(bbb!=true)print(bbb);}});
-//thread.start();
