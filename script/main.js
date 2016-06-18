@@ -5,6 +5,12 @@ print = function(s) {runOnUiThread(function() {try {android.widget.Toast.makeTex
 var date = java.lang.String.valueOf(android.text.format.DateFormat.format("yyyy-MM-dd_HH.mm.ss", new java.util.Date()));
 var log;
 var mods = [];
+var cachedMods = {
+	cores: [],
+	mods: [],
+	addons: []
+};
+
 var buttonWindow;
 
 var Java = {
@@ -27,14 +33,14 @@ var Java = {
 	}
 };
 
-var Paths = new Object();
+var Paths = {};
 Paths.minecraft = new Java.File("/sdcard/games/com.mojang/minecraftpe");
 Paths.mods = new Java.File(Paths.minecraft, "mods");
 Paths.configs = new Java.File(Paths.minecraft, "configs");
 Paths.logs = new Java.File(Paths.minecraft, "logs");
 Paths.tmp = new Java.File("/sdcard/games/com.mojang/minecraftpe/tmp");
 
-var Resources = {
+var resources = {
 	drawable: {
 		gui: {
 			button: {
@@ -154,24 +160,30 @@ function Mod(directory) {
 	this.description = info["description"] === undefined ? "No description available." : info.description;
 	this.version = info["version"] === undefined ? undefined : new Version(info.version);
 	this.authors = info["authors"] === undefined ? undefined : info.authors;
+	this.type = info["type"] === undefined ? "mod" : info.type;
 
 	this.config = new Object();
-	var modFile = new Java.File(this.directory, "mod.js");
 	this.scope = new API(this);
 
-	jsContext.evaluateReader(this.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
+	if (new Java.File(directory, "resources.zip").exists())
+		Java.ScriptManager.modPkgTexturePack.addPackage(new Java.File(directory, "resources.zip"));
 
-	mods[this.id] = this;
-	mods.push(this);
+	if (this.type == "core")
+		cachedMods.cores.push(this);
+	else if (this.type == "addon")
+		cachedMods.addons.push(this);
+	else
+		cachedMods.mods.push(this);
 }
 
 function API(mod) {
 	this.File = File;
 	this.Mods = Mods;
 	this.GUI = GUI;
-
+	this.Resources = Resources;
+	
 	this.print = function(s) {runOnUiThread(function() {try {android.widget.Toast.makeText(context, "[" + mod.name + "]: " + s, 500).show();} catch (err) {print(err);}});};
-
+	
 	this.Log = {
 		info:function(text) {
 			File.write(log, File.read(log) + "\n[INFO] [" + mod.name + "] " + text);
@@ -333,7 +345,7 @@ function getModInfo(mod) {
 function showModsButton() {
 	var layout = new android.widget.LinearLayout(context);
 	buttonWindow = new android.widget.PopupWindow(layout, Java.LayoutParams.wrapContent, Java.LayoutParams.wrapContent);
-	buttonWindow.setBackgroundDrawable(Resources.drawable.color.transparent);
+	buttonWindow.setBackgroundDrawable(resources.drawable.color.transparent);
 
 	var button = GUI.Button();
 	button.setText(lang.modsButton);
@@ -454,12 +466,12 @@ var GUI = {
 			)
 		);
 		button.setAllCaps(false);
-		button.setBackground(Resources.drawable.gui.button.normal);
+		button.setBackground(resources.drawable.gui.button.normal);
 		button.setTag(false); // is pressed?
 		button.setTextColor(android.graphics.Color.parseColor(textColor));
 		button.setPadding(8 * Display.dpi, 8 * Display.dpi, 8 * Display.dpi, 8 * Display.dpi);
 		GUI.stylizeText(button);
-		
+
 		return button;
 	},
 	TextView: function() {
@@ -481,14 +493,14 @@ var GUI = {
 		var darkWindow;
 		if (!outsideTouchable) {
 			darkWindow = new android.widget.PopupWindow(GUI.TextView(), -1, -1);
-			darkWindow.setBackgroundDrawable(Resources.drawable.color.dark);
+			darkWindow.setBackgroundDrawable(resources.drawable.color.dark);
 		}
 
 		var panel = new android.widget.FrameLayout(context);
 		var padding = dp2pixel(6);
-		panel.setBackgroundDrawable(Resources.drawable.gui.panel);
+		panel.setBackgroundDrawable(resources.drawable.gui.panel);
 		panel.setPadding(padding, padding, padding, padding);
-		
+
 		var window = new android.widget.PopupWindow(panel, width, height);
 
 		runOnUiThread(
@@ -536,7 +548,7 @@ var GUI = {
 		return controls;
 	},
 	stylizeText: function(textView) {
-		textView.setTypeface(Resources.font);
+		textView.setTypeface(resources.font);
 		textView.setPaintFlags(textView.getPaintFlags() | android.graphics.Paint.SUBPIXEL_TEXT_FLAG);
 		textView.setLineSpacing(4 * Display.dpi, 1);
 		var something = Math.round((textView.getLineHeight() - (4 * Display.dpi)) / 8);
@@ -579,32 +591,33 @@ var GUIUtils = {
 		}
 	},
 	changeToNormalState: function(button, textColor) {
-		button.setBackground(Resources.drawable.gui.button.normal);
+		button.setBackground(resources.drawable.gui.button.normal);
 		button.setTextColor(android.graphics.Color.parseColor(textColor));
 		var something = Math.round((button.getLineHeight() - (4 * Display.dpi)) / 8);
 		button.setShadowLayer(1, something, something, android.graphics.Color.parseColor("#FF393939"));
 	}, 
 	changeToPressedState: function(button) {
-		button.setBackground(Resources.drawable.gui.button.pressed);
+		button.setBackground(resources.drawable.gui.button.pressed);
 		button.setTextColor(android.graphics.Color.parseColor("#FFFFFF9C"));
 		var something = Math.round((button.getLineHeight() - (4 * Display.dpi)) / 8);
 		button.setShadowLayer(1, something, something, android.graphics.Color.parseColor("#FF3E3E28"));
 	}
 };
 
-function getResource(path) {
-	var bytes = ModPE.getBytesFromTexturePack(path);
-	if (bytes == null)
-		return false;
-	return bytes;
-}
-
-function getResourceString(path) {
-	var bytes = ModPE.getBytesFromTexturePack(path);
-	if (bytes == null)
-		return false;
-	return new java.lang.String(bytes);
-}
+var Resources = {
+	get: function(path) {
+		var bytes = ModPE.getBytesFromTexturePack(path);
+		if (bytes == null)
+			return false;
+		return bytes;
+	},
+	getString: function(path) {
+		var bytes = ModPE.getBytesFromTexturePack(path);
+		if (bytes == null)
+			return false;
+		return new java.lang.String(bytes);
+	}
+};
 
 function getResourceImage(path) {
 	var bytes = ModPE.getBytesFromTexturePack(path);
@@ -652,8 +665,9 @@ function init() {
 
 	initFiles();
 	initResources();
-	loadMods();
 	showModsButton();
+	loadMods();
+	initMods();
 }
 
 function initFiles() {
@@ -665,16 +679,49 @@ function initFiles() {
 }
 
 function initResources() {
-	File.writeBytes(new Java.File(Paths.tmp, "font.ttf"), getResource("font.ttf"));
-	Resources.font = android.graphics.Typeface.createFromFile(new Java.File(Paths.tmp, "font.ttf"));
+	File.writeBytes(new Java.File(Paths.tmp, "font.ttf"), Resources.get("font.ttf"));
+	resources.font = android.graphics.Typeface.createFromFile(new Java.File(Paths.tmp, "font.ttf"));
 	new Java.File(Paths.tmp, "font.ttf")["delete"]();
 
-	lang = JSON.parse(getResourceString("lang/en-US.lang"));
+	lang = JSON.parse(Resources.getString("lang/en-US.lang"));
 
-	Resources.drawable.gui.button.normal = getResource9Patch("gui/button/normal.png", 16, 16, 4, 4);
-	Resources.drawable.gui.button.pressed = getResource9Patch("gui/button/pressed.png", 16, 16, 4, 4);
-	Resources.drawable.gui.window = getResource9Patch("gui/window.png", 32, 32, 8, 8);
-	Resources.drawable.gui.panel = getResource9Patch("gui/panel.png", 28, 28, 6, 6);
+	resources.drawable.gui.button.normal = getResource9Patch("gui/button/normal.png", 16, 16, 4, 4);
+	resources.drawable.gui.button.pressed = getResource9Patch("gui/button/pressed.png", 16, 16, 4, 4);
+	resources.drawable.gui.window = getResource9Patch("gui/window.png", 32, 32, 8, 8);
+	resources.drawable.gui.panel = getResource9Patch("gui/panel.png", 28, 28, 6, 6);
+}
+
+function initMods() {
+	cachedMods.cores.forEach(
+		function(item, index, array) {
+			var modFile = new Java.File(item.directory, "mod.js");
+			jsContext.evaluateReader(item.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
+			mods[item.id] = item;
+			mods.push(item);
+		}
+	);
+	cachedMods.mods.forEach(
+		function(item, index, array) {
+			var modFile = new Java.File(item.directory, "mod.js");
+			jsContext.evaluateReader(item.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
+			mods[item.id] = item;
+			mods.push(item);
+		}
+	);
+	cachedMods.addons.forEach(
+		function(item, index, array) {
+			var modFile = new Java.File(item.directory, "mod.js");
+			jsContext.evaluateReader(item.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
+			mods[item.id] = item;
+			mods.push(item);
+		}
+	);
 }
 
 init();
+
+/*******************************|
+ |*************Hooks************|
+ |*******************************/
+
+
