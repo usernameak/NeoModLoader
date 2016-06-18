@@ -1,12 +1,5 @@
-var Resources = [
-	"font.ttf",
-	"lang/en-US.lang"
-];
-
 var context = com.mojang.minecraftpe.MainActivity.currentMainActivity.get();
 var jsContext = new org.mozilla.javascript.ContextFactory().enterContext();
-var transparentDrawable = new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT);
-var blackDrawable = new android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK);
 function runOnUiThread(func) {context.runOnUiThread(func);}
 print = function(s) {runOnUiThread(function() {try {android.widget.Toast.makeText(context, "[NML]: " + s, 500).show();} catch (err) {}});};
 var date = java.lang.String.valueOf(android.text.format.DateFormat.format("yyyy-MM-dd_HH.mm.ss", new java.util.Date()));
@@ -41,7 +34,32 @@ Paths.configs = new Java.File(Paths.minecraft, "configs");
 Paths.logs = new Java.File(Paths.minecraft, "logs");
 Paths.tmp = new Java.File("/sdcard/games/com.mojang/minecraftpe/tmp");
 
-var minecraftFont;
+var Resources = {
+	drawable: {
+		gui: {
+			button: {
+				normal: null, 
+				pressed: null
+			},
+			window: null,
+			panel: null
+		}, 
+		color: {
+			transparent: new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT), 
+			black: new android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK),
+			dark: new android.graphics.drawable.ColorDrawable(android.graphics.Color.argb(127, 0, 0, 0)), 
+		}
+	},
+	font: null
+};
+
+var metrics = context.getResources().getDisplayMetrics();
+
+var Display = {
+	width: metrics.widthPixels > metrics.heightPixels ? metrics.widthPixels : metrics.heightPixels, 
+	height: metrics.heightPixels < metrics.widthPixels ? metrics.heightPixels : metrics.widthPixels, 
+	dpi: metrics.density
+};
 
 var lang;
 
@@ -150,6 +168,7 @@ function Mod(directory) {
 function API(mod) {
 	this.File = File;
 	this.Mods = Mods;
+	this.GUI = GUI;
 
 	this.print = function(s) {runOnUiThread(function() {try {android.widget.Toast.makeText(context, "[" + mod.name + "]: " + s, 500).show();} catch (err) {print(err);}});};
 
@@ -215,77 +234,90 @@ function loadMods() {
 }
 
 function showModList() {
-	var layout = new android.widget.RelativeLayout(context);
+	var padding = dp2pixel(6);
 
-	var window = new android.widget.PopupWindow(layout, Java.LayoutParams.fillParent, Java.LayoutParams.fillParent);
-	window.setBackgroundDrawable(blackDrawable);
+	var s = {};
 
-	var layoutParams;
+	s.window = {
+		x: (Display.height / 16) - padding,
+		y: (Display.height / 16) - padding, 
+		width: Display.width - (Display.height / 8),
+		height: Display.height - (Display.height / 8),
+		widthP: (Display.width - (Display.height / 8)) + (padding * 2),
+		heightP: (Display.height - (Display.height / 8)) + (padding * 2)
+	};
 
-	var width = context.getResources().getDisplayMetrics().widthPixels;
-	var height = context.getResources().getDisplayMetrics().heightPixels;
-	var width4 = width / 4;
-	var width32 = width / 32;
-	var height5 = height / 5;
-	var height10 = height / 10;
+	s.title = {
+		width: s.window.width,
+		height: s.window.height / 12
+	};
 
-	var modInfo = new android.widget.TextView(context);
-	modInfo.setTypeface(minecraftFont);
-	layoutParams = android.widget.RelativeLayout.LayoutParams(width - width4 - width32, height - height5);
-	layoutParams.addRule(11);
-	layoutParams.addRule(15);
-	modInfo.setLayoutParams(layoutParams);
-	layout.addView(modInfo);
+	s.closeButton = {
+		x: (s.window.width / 4) + (s.window.width / 32),
+		y: s.window.height - (s.window.height / 6),
+		width: s.window.width - (s.window.width / 4) - (s.window.width / 32),
+		height: s.window.height / 6
+	};
 
-	var title = new android.widget.TextView(context);
-	title.setTypeface(minecraftFont);
+	s.configButton = {
+		y: s.window.height - (s.window.height / 6),
+		width: s.window.width / 4,
+		height: s.window.height / 12
+	};
+
+	s.modList = {
+		y: s.title.height,
+		width: s.window.width / 4,
+		height: s.window.height - (s.title.height + s.closeButton.height)
+	};
+
+	s.modInfo = {
+		x: s.modList.width + (s.window.width / 32),
+		y: s.title.height,
+		width: s.window.width - (s.modList.width + (s.window.width / 32)),
+		height: s.window.height - (s.title.height + s.closeButton.height)
+	};
+
+	var panel = GUI.Panel(0, 0, s.window.widthP, s.window.heightP, true);
+
+	var modInfo = GUI.TextView();
+	panel.addView(modInfo, s.modInfo.x, s.modInfo.y, s.modInfo.width, s.modInfo.height);
+
+	var title = GUI.TextView();
 	title.setText(lang.modsListTitle);
 	title.setGravity(Java.Gravity.center);
-	layoutParams = android.widget.RelativeLayout.LayoutParams(-1, height10);
-	layoutParams.addRule(10);
-	title.setLayoutParams(layoutParams);
-	layout.addView(title);
+	panel.addView(title, 0, 0, s.title.width, s.title.height);
 
-	var closeButton = new android.widget.Button(context);
-	closeButton.setTypeface(minecraftFont);
+	var closeButton = GUI.Button();
 	closeButton.setText(lang.modsListClose);
-	closeButton.setOnClickListener(function() {window.dismiss();});
-	layoutParams = android.widget.RelativeLayout.LayoutParams(-1, height10);
-	layoutParams.addRule(12);
-	closeButton.setLayoutParams(layoutParams);
-	layout.addView(closeButton);
+	closeButton.setOnClickListener(function() {showModsButton();panel.dismiss();});
+	panel.addView(closeButton, s.closeButton.x, s.closeButton.y, s.closeButton.width, s.closeButton.height);
 
-	var modList = new android.widget.ScrollView(context);
-	var modListLayout = new android.widget.LinearLayout(context);
-	modListLayout.setOrientation(1);
-	modList.addView(modListLayout);
+	var configButton = GUI.Button();
+	configButton.setText(lang.modsListConfig);
+	configButton.setOnClickListener(function() {});
+	configButton.setClickable(false);
+	panel.addView(configButton, 0, s.configButton.y, s.configButton.width, s.configButton.height);
+
+	var modList = GUI.ScrollList();
 	mods.forEach(
 		function(mod, index, array) {
 			modName = mod.name + "\n";
 			if (mod.version !== undefined)
 				modName += mod.version;
 
-			var listItem = new android.widget.Button(context);
-			listItem.setTypeface(minecraftFont);
+			var listItem = GUI.Button();
 			listItem.setGravity(Java.Gravity.left);
 			listItem.setText(modName);
 			listItem.setOnClickListener(
 				function() {
 					modInfo.setText(getModInfo(mod));
 				});
-			modListLayout.addView(listItem);
+			modList.addItem(listItem);
 		});
-	layoutParams = android.widget.RelativeLayout.LayoutParams(width4, height - height5);
-	layoutParams.addRule(9);
-	layoutParams.addRule(15);
-	modList.setLayoutParams(layoutParams);
-	layout.addView(modList);
+	panel.addView(modList, 0, s.modList.y, s.modList.width, s.modList.height);
 
-	runOnUiThread(
-		function() {
-			window.showAtLocation(context.getWindow().getDecorView(), Java.Gravity.center, 0, 0);
-		}
-	);
+	hideModsButton();
 }
 
 function getModInfo(mod) {
@@ -301,10 +333,9 @@ function getModInfo(mod) {
 function showModsButton() {
 	var layout = new android.widget.LinearLayout(context);
 	buttonWindow = new android.widget.PopupWindow(layout, Java.LayoutParams.wrapContent, Java.LayoutParams.wrapContent);
-	buttonWindow.setBackgroundDrawable(transparentDrawable);
+	buttonWindow.setBackgroundDrawable(Resources.drawable.color.transparent);
 
-	var button = new android.widget.Button(context);
-	button.setTypeface(minecraftFont);
+	var button = GUI.Button();
 	button.setText(lang.modsButton);
 	button.setOnClickListener(function() {showModList();});
 	layout.addView(button);
@@ -320,9 +351,9 @@ function hideModsButton() {
 	buttonWindow.dismiss();
 }
 
-/******************************/
-/**********API block***********/
-/******************************/
+/*******************************|
+ |**********API block***********|
+ |*******************************/
 
 File = {
 	read: function(file) {
@@ -407,23 +438,209 @@ var JSON = {
 	}
 };
 
-function getResource(path) {
-	var bytes = ModPE.getBytesFromTexturePack(path);
-	if (bytes == null)
-		return false;
-	return new java.lang.String(bytes);
-}
+var GUI = {
+	Button: function() {
+		var textColor = "#FFDDDDDD";
 
-function getResourceBytes(path) {
+		var button = new android.widget.Button(context);
+		button.setTextSize(16);
+		button.setOnTouchListener(
+			new android.view.View.OnTouchListener(
+				function(v, motionEvent) {
+					if (button.isClickable())
+						GUIUtils.onTouch(v, motionEvent);
+					return false;
+				}
+			)
+		);
+		button.setAllCaps(false);
+		button.setBackground(Resources.drawable.gui.button.normal);
+		button.setTag(false); // is pressed?
+		button.setTextColor(android.graphics.Color.parseColor(textColor));
+		button.setPadding(8 * Display.dpi, 8 * Display.dpi, 8 * Display.dpi, 8 * Display.dpi);
+		GUI.stylizeText(button);
+		
+		return button;
+	},
+	TextView: function() {
+		var textColor = "#FFDDDDDD";
+
+		var textView = new android.widget.TextView(context);
+		textView.setTextSize(16);
+		textView.setAllCaps(false);
+		textView.setTextColor(android.graphics.Color.parseColor(textColor));
+		GUI.stylizeText(textView);
+
+		return textView;
+	},
+	Panel: function(x, y, width, height, isCenter, outsideTouchable) {
+		if (isCenter == undefined)
+			isCenter = false;
+		if (outsideTouchable == undefined)
+			outsideTouchable = false;
+		var darkWindow;
+		if (!outsideTouchable) {
+			darkWindow = new android.widget.PopupWindow(GUI.TextView(), -1, -1);
+			darkWindow.setBackgroundDrawable(Resources.drawable.color.dark);
+		}
+
+		var panel = new android.widget.FrameLayout(context);
+		var padding = dp2pixel(6);
+		panel.setBackgroundDrawable(Resources.drawable.gui.panel);
+		panel.setPadding(padding, padding, padding, padding);
+		
+		var window = new android.widget.PopupWindow(panel, width, height);
+
+		runOnUiThread(
+			function() {
+				if (!outsideTouchable)
+					darkWindow.showAtLocation(context.getWindow().getDecorView(), Java.Gravity.center, 0, 0);
+				window.showAtLocation(context.getWindow().getDecorView(), isCenter ? Java.Gravity.center : Java.Gravity.topLeft, x, y);
+			}
+		);
+
+		var controls = {
+			dismiss: function() {
+				darkWindow.dismiss();
+				window.dismiss();
+			}, 
+			addView: function(view, x, y, width, height) {
+				if (view.view != undefined)
+					view = view.view;
+
+				var layoutParams = android.widget.FrameLayout.LayoutParams(width, height);
+				view.setLayoutParams(layoutParams);
+				view.setX(x);
+				view.setY(y);
+				panel.addView(view);
+			}
+		};
+
+		return controls;
+	},
+	ScrollList: function() {
+		var list = new android.widget.ScrollView(context);
+		var listLayout = new android.widget.LinearLayout(context);
+		listLayout.setOrientation(1);
+		list.addView(listLayout);
+
+		var controls = {
+			addItem: function(item) {
+				var layoutParams = android.widget.FrameLayout.LayoutParams(-1, -2);
+				item.setLayoutParams(layoutParams);
+				listLayout.addView(item);
+			},
+			view: list
+		};
+
+		return controls;
+	},
+	stylizeText: function(textView) {
+		textView.setTypeface(Resources.font);
+		textView.setPaintFlags(textView.getPaintFlags() | android.graphics.Paint.SUBPIXEL_TEXT_FLAG);
+		textView.setLineSpacing(4 * Display.dpi, 1);
+		var something = Math.round((textView.getLineHeight() - (4 * Display.dpi)) / 8);
+		textView.setShadowLayer(1, something, something, android.graphics.Color.parseColor("#FF393939"));
+	}
+};
+
+var GUIUtils = {
+	onTouch: function(v, motionEvent) {
+		var textColor = "#FFDDDDDD";
+
+		var action = motionEvent.getActionMasked();
+		if (action == android.view.MotionEvent.ACTION_DOWN) {
+			// button pressed
+			GUIUtils.changeToPressedState(v);
+		}
+		if (action == android.view.MotionEvent.ACTION_CANCEL || action == android.view.MotionEvent.ACTION_UP) {
+			// button released
+			GUIUtils.changeToNormalState(v, textColor);
+		}
+		if (action == android.view.MotionEvent.ACTION_MOVE) {
+			var rect = new android.graphics.Rect(v.getLeft(), v.getTop(), v.getRight(), v.getBottom());
+			if (rect.contains(v.getLeft() + motionEvent.getX(), v.getTop() + motionEvent.getY())) {
+				// pointer inside the view
+				if (v.getTag() == false) {
+					// restore pressed state
+					v.setTag(true); // is pressed?
+
+					GUIUtils.changeToPressedState(v);
+				}
+			} else {
+				// pointer outside the view
+				if (v.getTag() == true) {
+					// restore pressed state
+					v.setTag(false); // is pressed?
+
+					GUIUtils.changeToNormalState(v, textColor);
+				}
+			}
+		}
+	},
+	changeToNormalState: function(button, textColor) {
+		button.setBackground(Resources.drawable.gui.button.normal);
+		button.setTextColor(android.graphics.Color.parseColor(textColor));
+		var something = Math.round((button.getLineHeight() - (4 * Display.dpi)) / 8);
+		button.setShadowLayer(1, something, something, android.graphics.Color.parseColor("#FF393939"));
+	}, 
+	changeToPressedState: function(button) {
+		button.setBackground(Resources.drawable.gui.button.pressed);
+		button.setTextColor(android.graphics.Color.parseColor("#FFFFFF9C"));
+		var something = Math.round((button.getLineHeight() - (4 * Display.dpi)) / 8);
+		button.setShadowLayer(1, something, something, android.graphics.Color.parseColor("#FF3E3E28"));
+	}
+};
+
+function getResource(path) {
 	var bytes = ModPE.getBytesFromTexturePack(path);
 	if (bytes == null)
 		return false;
 	return bytes;
 }
 
-/******************************/
-/*****Initialization block*****/
-/******************************/
+function getResourceString(path) {
+	var bytes = ModPE.getBytesFromTexturePack(path);
+	if (bytes == null)
+		return false;
+	return new java.lang.String(bytes);
+}
+
+function getResourceImage(path) {
+	var bytes = ModPE.getBytesFromTexturePack(path);
+	if (bytes == null)
+		return false;
+	return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+}
+
+function getResource9Patch(path, widthDp, heightDp, widthPadding, heightPadding) {
+	var bytes = ModPE.getBytesFromTexturePack(path);
+	if (bytes == null)
+		return false;
+	var bitmap =  android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+	var scaledBitmap = android.graphics.Bitmap.createScaledBitmap(bitmap, Math.round(dp2pixel(widthDp)), Math.round(dp2pixel(heightDp)), false); // scale image to a bigger size and based on density
+	var NO_COLOR = 0x00000001;
+	var buffer = java.nio.ByteBuffer.allocate(84).order(java.nio.ByteOrder.nativeOrder());
+	buffer.put(0x01); //was translated
+	for (var i = 1;i <= 2;i++) buffer.put(0x02); //divx & divy size
+	buffer.put(0x09); //color size
+	for (var i = 1;i <= 7;i++) buffer.putInt(0); //skip + padding + skip 4 bytes
+	buffer.putInt(dp2pixel(widthPadding));
+	buffer.putInt(dp2pixel(widthDp - widthPadding));
+	buffer.putInt(dp2pixel(heightPadding));
+	buffer.putInt(dp2pixel(heightDp - heightPadding));
+	for (var i = 1;i <= 9;i++) buffer.putInt(NO_COLOR);
+
+	return new android.graphics.drawable.NinePatchDrawable(context.getResources(), scaledBitmap, buffer.array(), new android.graphics.Rect(), ""); // convert to NinePatch
+};
+
+function dp2pixel(dp) {
+	return (dp * Display.dpi);
+}
+
+/*******************************|
+ |********Initialization********|
+ |*******************************/
 
 function init() {
 	for (var i = 0;;i++)
@@ -432,8 +649,9 @@ function init() {
 			break;
 		}
 	File.write(log, "[INFO] NML initialization");
-	
+
 	initFiles();
+	initResources();
 	loadMods();
 	showModsButton();
 }
@@ -444,22 +662,19 @@ function initFiles() {
 	Paths.configs.mkdirs();
 	Paths.logs.mkdirs();
 	Paths.tmp.mkdirs();
+}
 
-	Resources.forEach(
-		function(item, index, array) {
-			if (!getResource(item)) {
-				Log.error("NML can't load because some resources is unaccessible.");
-				throw new java.lang.Exception("NML can't load because some resources is unaccessible.");
-			}
-		}
-	);
-
-	if (!new Java.File(Paths.tmp, "font.ttf").exists())
-		File.writeBytes(new Java.File(Paths.tmp, "font.ttf"), getResourceBytes("font.ttf"));
-	minecraftFont = android.graphics.Typeface.createFromFile(new Java.File(Paths.tmp, "font.ttf"));
+function initResources() {
+	File.writeBytes(new Java.File(Paths.tmp, "font.ttf"), getResource("font.ttf"));
+	Resources.font = android.graphics.Typeface.createFromFile(new Java.File(Paths.tmp, "font.ttf"));
 	new Java.File(Paths.tmp, "font.ttf")["delete"]();
-	
-	lang = JSON.parse(getResource("lang/en-US.lang"));
+
+	lang = JSON.parse(getResourceString("lang/en-US.lang"));
+
+	Resources.drawable.gui.button.normal = getResource9Patch("gui/button/normal.png", 16, 16, 4, 4);
+	Resources.drawable.gui.button.pressed = getResource9Patch("gui/button/pressed.png", 16, 16, 4, 4);
+	Resources.drawable.gui.window = getResource9Patch("gui/window.png", 32, 32, 8, 8);
+	Resources.drawable.gui.panel = getResource9Patch("gui/panel.png", 28, 28, 6, 6);
 }
 
 init();
