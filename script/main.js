@@ -1,5 +1,5 @@
 var context = com.mojang.minecraftpe.MainActivity.currentMainActivity.get();
-var jsContext = new org.mozilla.javascript.ContextFactory().enterContext();
+var jsContext = org.mozilla.javascript.ContextFactory().enterContext();
 function runOnUiThread(func) {context.runOnUiThread(func);}
 print = function(s) {runOnUiThread(function() {try {android.widget.Toast.makeText(context, "[NML]: " + s, 500).show();} catch (err) {}});};
 var date = java.lang.String.valueOf(android.text.format.DateFormat.format("yyyy-MM-dd_HH.mm.ss", new java.util.Date()));
@@ -200,18 +200,9 @@ function API(mod) {
 		get:function(name) {
 			return mod.config[name];
 		}, 
-		getFull:function() {
-			return mods[mod.id].config;
-		},
 		set:function(name, value) {
 			mod.config[name] = value;
 			Config.save(new Java.File(Paths.configs, mod.id + ".cfg", mod.config));
-			return true;
-		},
-		setFull:function(value) {
-			mod.config = value;
-			Config.save(new Java.File(Paths.configs, mod.id + ".cfg", mod.config));
-			return true;
 		}
 	};
 }
