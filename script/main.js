@@ -4,6 +4,7 @@ function runOnUiThread(func) {context.runOnUiThread(func);}
 print = function(s) {runOnUiThread(function() {try {android.widget.Toast.makeText(context, "[NML]: " + s, 500).show();} catch (err) {}});};
 var date = java.lang.String.valueOf(android.text.format.DateFormat.format("yyyy-MM-dd_HH.mm.ss", new java.util.Date()));
 var log;
+
 var mods = [];
 var cachedMods = {
 	cores: [],
@@ -161,8 +162,10 @@ function Mod(directory) {
 	this.version = info["version"] === undefined ? undefined : new Version(info.version);
 	this.authors = info["authors"] === undefined ? undefined : info.authors;
 	this.type = info["type"] === undefined ? "mod" : info.type;
-
-	this.config = new Object();
+	
+	if (!new Java.File(Paths.configs, this.id + ".cfg").exists);
+		Config.save(new Java.File(Paths.configs, this.id + ".cfg"), {});
+	this.config = Config.parse(new Java.File(Paths.configs, this.id + ".cfg"));
 	this.scope = new API(this);
 
 	if (new Java.File(directory, "resources.zip").exists())
@@ -202,7 +205,7 @@ function API(mod) {
 		}, 
 		set:function(name, value) {
 			mod.config[name] = value;
-			Config.save(new Java.File(Paths.configs, mod.id + ".cfg", mod.config));
+			Config.save(new Java.File(Paths.configs, mod.id + ".cfg"), mod.config);
 		}
 	};
 }
