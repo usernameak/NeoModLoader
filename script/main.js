@@ -731,7 +731,7 @@ function initMods() {
 				var modFile = new Java.File(mod.directory, "mod.js");
 				if(!modFile.isFile()) {
 					var modFile = new Java.File(mod.directory, "mod.coffee");
-					jsContext.evaluateString(mod.scope, CoffeeScript.compile(File.read(modFile), {bare:false}), modFile.getName(), 0, null);
+					jsContext.evaluateString(mod.scope, CoffeeScript.compile(File.read(modFile), {bare:true}), modFile.getName(), 0, null);
 				} else {
 					jsContext.evaluateReader(mod.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
 				}
