@@ -140,8 +140,8 @@ function Version(str) {
 function Mod(directory) {
 	this.directory = directory;
 
-	if (!new Java.File(directory, "mod.js").isFile()) {
-		Log.error("Mod \"" + directory.getName() + "\" cannot be loaded. mod.js is missing");
+	if (!new Java.File(directory, "mod.js").isFile() || !new Java.File(directory, "mod.coffee").isFile()) {
+		Log.error("Mod \"" + directory.getName() + "\" cannot be loaded. mod.js or mod.coffee is missing");
 		return;
 	}
 
@@ -229,7 +229,8 @@ function API(mod) {
 function loadMod(directory) {
 	if (directory.isDirectory()) {
 		var modFile = new Java.File(directory, "mod.js");
-		if (modFile.isFile()) {
+		var coffeeModFile = new Java.File(directory, "mod.coffee");
+		if (modFile.isFile() || coffeeModFile.isFile()) {
 			var mod = new Mod(directory);
 			return true;
 		}
@@ -728,7 +729,12 @@ function initMods() {
 			);
 			if (dependenciesMet) {
 				var modFile = new Java.File(mod.directory, "mod.js");
-				jsContext.evaluateReader(mod.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
+				if(!modFile.isFile()) {
+					var modFile = new Java.File(mod.directory, "mod.coffee");
+					jsContext.evaluateString(mod.scope, CoffeeScript.compile(File.read(modFile), {bare:false}), modFile.getName(), 0, null);
+				} else {
+					jsContext.evaluateReader(mod.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
+				}
 				mods[mod.id] = mod;
 				mods.push(mod);
 			} else {
