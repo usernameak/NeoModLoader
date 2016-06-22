@@ -1,3 +1,6 @@
+var NMLVersion = new Version("0.0.3");
+ModPE.langEdit("menu.copyright", "NeoModLoader v" + NMLVersion);
+
 var context = com.mojang.minecraftpe.MainActivity.currentMainActivity.get();
 var jsContext = org.mozilla.javascript.ContextFactory().enterContext();
 function runOnUiThread(func) {context.runOnUiThread(func);}
@@ -6,11 +9,9 @@ var date = java.lang.String.valueOf(android.text.format.DateFormat.format("yyyy-
 var log;
 
 var mods = [];
-var cachedMods = {
-	cores: [],
-	mods: [],
-	addons: []
-};
+var cachedMods = [];
+var hooks = [];
+var commands = {};
 
 var buttonWindow;
 
@@ -105,27 +106,30 @@ function Version(str) {
 	this.smallerThan = function(ver) {
 		if (this.major < ver.major)
 			return true;
-		if (this.major == ver.major && this.minor < ver.minor)
+		else if (this.major == ver.major && this.minor < ver.minor)
 			return true;
-		if (this.major == ver.major && this.minor == ver.minor && this.build < ver.build)
+		else if (this.major == ver.major && this.minor == ver.minor && this.build < ver.build)
 			return true;
-		return false;
+		else
+			return false;
 	};
 
 	this.equalsTo = function(ver) {
 		if (this.major == ver.major && this.minor == ver.minor && this.build == ver.build)
 			return true;
-		return false;
+		else
+			return false;
 	};
 
 	this.biggerThan = function(ver) {
 		if (this.major > ver.major)
 			return true;
-		if (this.major == ver.major && this.minor > ver.minor)
+		else if (this.major == ver.major && this.minor > ver.minor)
 			return true;
-		if (this.major == ver.major && this.minor == ver.minor && this.build > ver.build)
+		else if (this.major == ver.major && this.minor == ver.minor && this.build > ver.build)
 			return true;
-		return false;
+		else
+			return false;
 	};
 
 	this.toString = function() {
@@ -152,31 +156,26 @@ function Mod(directory) {
 		return;
 	}
 
-	if (Mods.isModLoaded(info["id"])) {
+	if (Mods.isModLoaded(info["id"]))
 		Log.error("Mod cannot be loaded. Mod with id \"" + info.id + "\"already loaded.");
-	}
 
 	this.name = info.name;
 	this.id = info.id;
 	this.description = info["description"] === undefined ? "No description available." : info.description;
 	this.version = info["version"] === undefined ? undefined : new Version(info.version);
 	this.authors = info["authors"] === undefined ? undefined : info.authors;
-	this.type = info["type"] === undefined ? "mod" : info.type;
-	
+	this.dependencies = info["dependencies"] === undefined ? [] : info.dependencies;
+	this.hooks = [];
+
 	if (!new Java.File(Paths.configs, this.id + ".cfg").exists);
-		Config.save(new Java.File(Paths.configs, this.id + ".cfg"), {});
+	Config.save(new Java.File(Paths.configs, this.id + ".cfg"), {});
 	this.config = Config.parse(new Java.File(Paths.configs, this.id + ".cfg"));
 	this.scope = new API(this);
 
 	if (new Java.File(directory, "resources.zip").exists())
 		Java.ScriptManager.modPkgTexturePack.addPackage(new Java.File(directory, "resources.zip"));
 
-	if (this.type == "core")
-		cachedMods.cores.push(this);
-	else if (this.type == "addon")
-		cachedMods.addons.push(this);
-	else
-		cachedMods.mods.push(this);
+	cachedMods.push(this);
 }
 
 function API(mod) {
@@ -184,9 +183,9 @@ function API(mod) {
 	this.Mods = Mods;
 	this.GUI = GUI;
 	this.Resources = Resources;
-	
+
 	this.print = function(s) {runOnUiThread(function() {try {android.widget.Toast.makeText(context, "[" + mod.name + "]: " + s, 500).show();} catch (err) {print(err);}});};
-	
+
 	this.Log = {
 		info:function(text) {
 			File.write(log, File.read(log) + "\n[INFO] [" + mod.name + "] " + text);
@@ -208,6 +207,23 @@ function API(mod) {
 			Config.save(new Java.File(Paths.configs, mod.id + ".cfg"), mod.config);
 		}
 	};
+
+	this.ModPE = ModPE;
+	this.Level = Level;
+	this.Player = Player;
+	this.Entity = Entity;
+	this.Item = Item;
+	this.Block = Block;
+	this.Server = Server;
+
+	this.Game = {
+		addCommand: function(command, func) {
+			commands[command] = func;
+		},
+		hook : function(hookName, func) {
+			mod.hooks.push([hookName, func]);
+		}
+	};
 }
 
 function loadMod(directory) {
@@ -226,17 +242,14 @@ function loadMods() {
 		id: "NML",
 		description: "First mod loader for MCPE",
 		name: "NeoModLoader",
-		version: new Version("0.0.1"),
+		version: NMLVersion,
 		authors: "NeoKat",
-		scope: {}
+		scope: {},
+		hooks: []
 	};
 	mods.push(mods.NML);
 	var list = Paths.mods.listFiles();
-	list.forEach(
-		function(item, index, array) {
-			loadMod(item);
-		}
-	);
+	list.forEach(loadMod);
 }
 
 function showModList() {
@@ -307,7 +320,7 @@ function showModList() {
 
 	var modList = GUI.ScrollList();
 	mods.forEach(
-		function(mod, index, array) {
+		function(mod) {
 			modName = mod.name + "\n";
 			if (mod.version !== undefined)
 				modName += mod.version;
@@ -363,9 +376,8 @@ function hideModsButton() {
 
 File = {
 	read: function(file) {
-		if (!file.exists()) {
+		if (!file.exists())
 			file.createNewFile();
-		}
 		var fileInput = new java.io.FileInputStream(file);
 		var output = "";
 		var data = fileInput.read();
@@ -413,7 +425,7 @@ Config = {
 		return JSON.parse(File.read(file));
 	}, 
 	save:function(file, inp) {
-		File.writeFile(file, JSON.compile(out));
+		File.write(file, JSON.compile(inp));
 	}
 };
 
@@ -555,14 +567,13 @@ var GUIUtils = {
 		var textColor = "#FFDDDDDD";
 
 		var action = motionEvent.getActionMasked();
-		if (action == android.view.MotionEvent.ACTION_DOWN) {
-			// button pressed
+
+		if (action == android.view.MotionEvent.ACTION_DOWN) //button pressed
 			GUIUtils.changeToPressedState(v);
-		}
-		if (action == android.view.MotionEvent.ACTION_CANCEL || action == android.view.MotionEvent.ACTION_UP) {
-			// button released
+
+		if (action == android.view.MotionEvent.ACTION_CANCEL || action == android.view.MotionEvent.ACTION_UP) //button released
 			GUIUtils.changeToNormalState(v, textColor);
-		}
+
 		if (action == android.view.MotionEvent.ACTION_MOVE) {
 			var rect = new android.graphics.Rect(v.getLeft(), v.getTop(), v.getRight(), v.getBottom());
 			if (rect.contains(v.getLeft() + motionEvent.getX(), v.getTop() + motionEvent.getY())) {
@@ -610,6 +621,23 @@ var Resources = {
 		if (bytes == null)
 			return false;
 		return new java.lang.String(bytes);
+	}
+};
+
+var Hooks = {
+	call: function(hookName, args) {
+		mods.forEach(
+			function(mod) {
+				if (mod.scope.hasOwnProperty(hookName))
+					mod.scope[hookName].apply(mod.scope, args);
+				mod.hooks.forEach(
+					function(hook) {
+						if (hook[0] == hookName)
+							hook[1].apply(mod.scope, args);
+					}
+				);
+			}
+		);
 	}
 };
 
@@ -686,30 +714,29 @@ function initResources() {
 }
 
 function initMods() {
-	cachedMods.cores.forEach(
-		function(item, index, array) {
-			var modFile = new Java.File(item.directory, "mod.js");
-			jsContext.evaluateReader(item.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
-			mods[item.id] = item;
-			mods.push(item);
+	var unmetMods = [];
+	while (unmetMods.length != cachedMods.length) {
+		unmetMods = [];
+		while (cachedMods.length > 0) {
+			var mod = cachedMods.shift();
+			var dependenciesMet = true;
+			mod.dependencies.forEach(
+				function(item, index, array) {
+					if (!Mods.isModLoaded(item))
+						dependenciesMet = false;
+				}
+			);
+			if (dependenciesMet) {
+				var modFile = new Java.File(mod.directory, "mod.js");
+				jsContext.evaluateReader(mod.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
+				mods[mod.id] = mod;
+				mods.push(mod);
+			} else {
+				unmetMods.push(mod);
+			}
 		}
-	);
-	cachedMods.mods.forEach(
-		function(item, index, array) {
-			var modFile = new Java.File(item.directory, "mod.js");
-			jsContext.evaluateReader(item.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
-			mods[item.id] = item;
-			mods.push(item);
-		}
-	);
-	cachedMods.addons.forEach(
-		function(item, index, array) {
-			var modFile = new Java.File(item.directory, "mod.js");
-			jsContext.evaluateReader(item.scope, new java.io.FileReader(modFile), modFile.getName(), 0, null);
-			mods[item.id] = item;
-			mods.push(item);
-		}
-	);
+		cachedMods = unmetMods;
+	}
 }
 
 init();
@@ -718,4 +745,88 @@ init();
  |*************Hooks************|
  |*******************************/
 
+function attackHook(attacker, victim) {
+	Hooks.call(arguments.callee.name, arguments);
+}
 
+function chatHook(str) {
+	if (str.startsWith("/")) {
+		var spl = str.slice(1).split(" ");
+		if (commands.hasOwnProperty(spl[0]))
+			commands[spl.shift()].apply(undefined, spl);
+	} else {
+		Hooks.call(arguments.callee.name, arguments);
+	}
+}
+
+function continueDestroyBlock(x, y, z, side, progress) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function destroyBlock(x, y, z, side) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function projectileHitEntityHook(projectile, targetEntity) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function eatHook(hearts, saturationRatio) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function entityAddedHook(entity) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function entityHurtHook(attacker, victim, halfhearts) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function entityRemovedHook(entity) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function explodeHook(entity, x, y, z, power, onFire) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function serverMessageReceiveHook(str) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function deathHook(attacker, victim) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function playerAddExpHook(player, experienceAdded) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function playerExpLevelChangeHook(player, levelsAdded) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function redstoneUpdateHook(x, y, z, newCurrent, someBooleanIDontKnow, blockId, blockData) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function newLevel() {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function startDestroyBlock(x, y, z, side) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function projectileHitBlockHook(projectile, blockX, blockY, blockZ, side) {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function modTick() {
+	Hooks.call(arguments.callee.name, arguments);
+}
+
+function useItem(x, y, z, itemid, blockid, side, itemDamage, blockDamage) {
+	Hooks.call(arguments.callee.name, arguments);
+}
